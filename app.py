@@ -232,16 +232,20 @@ def get_states():
 def get_cities_in_state(state_code):
     """Get list of all cities in a state from the database"""
     state_code = state_code.lower()
-    cities = []
     
-    # Get cities for this state from the cache
-    for city_key, state in db_cache.cities.items():
-        if state == state_code:
-            city_name = city_key.split('|')[0]  # Extract city name from the key
-            cities.append(city_name)
-    
-    # Sort cities alphabetically
-    return sorted(cities)
+    # The structure of db_cache.cities changed - it's now a dict with state_code as keys
+    # and lists of cities as values
+    if state_code in db_cache.cities:
+        return sorted(db_cache.cities[state_code])
+    else:
+        print(f"Warning: No cities found for state code '{state_code}'")
+        # Try to get cities directly from the database as fallback
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT city_name FROM Cities WHERE LOWER(state_code) = ?", (state_code,))
+        cities = [row['city_name'] for row in cursor.fetchall()]
+        conn.close()
+        return sorted(cities)
 
 def get_other_cities_in_state(state_code, current_city):
     """Get list of other cities in the same state, excluding the current city"""
@@ -370,7 +374,9 @@ def handle_home():
             # It's a state page - list all cities in that state
             state = subdomain
             state_full_name = get_state_full_name(state)
+            print(f"DEBUG: Processing state page for {state} ({state_full_name})")
             cities = get_cities_in_state(state)
+            print(f"DEBUG: Found {len(cities)} cities for state {state}: {cities[:5]}...")
             
             # Load required.json for main service
             required_data = request.required_data
@@ -389,7 +395,13 @@ def handle_home():
                     
             # Make sure we have city links
             if not city_links:
-                print(f"Warning: No cities found for state {state}")
+                print(f"ERROR: No city links generated for state {state}")
+            else:
+                print(f"DEBUG: Generated {len(city_links)} city links for state {state}")
+                # Print a few examples
+                sample_links = list(city_links.items())[:3]
+                for city, link in sample_links:
+                    print(f"DEBUG: City link: {city} -> {link}")
             
             # Get HTML content from domain folder
             state_path = f"domains/{main_domain}/state.html"
