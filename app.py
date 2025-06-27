@@ -285,10 +285,7 @@ def get_current_month_year():
         "year": now.strftime("%Y")
     }
 
-@app.before_request
-def before_request():
-    # Load only the required.json data
-    request.required_data = load_required_json()
+# Removed redundant before_request hook that was causing NoneType errors
 
 @app.context_processor
 def inject_date():
