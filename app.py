@@ -386,6 +386,10 @@ def handle_home():
                     main_service_slug = main_service.lower().replace(' ', '-')
                     url = f"https://{main_service_slug}-{city_slug}-{state}.{main_domain}"
                     city_links[city] = url
+                    
+            # Make sure we have city links
+            if not city_links:
+                print(f"Warning: No cities found for state {state}")
             
             # Get HTML content from domain folder
             state_path = f"domains/{main_domain}/state.html"
@@ -398,12 +402,14 @@ def handle_home():
                     template = Template(content)
                     rendered = template.render(
                         state=state.upper(),
+                        state_name=state_full_name,  # Add state_name for the template
                         state_full_name=state_full_name,
                         city_links=city_links,
                         required=required_data,
                         canonical_url=get_canonical_url(),
                         main_service=main_service,
-                        company_name=required_data.get("company_name")
+                        city_name="",  # Empty placeholder for city_name in the template
+                        company_name=required_data.get("Company Name", "")
                     )
                     return rendered
                 else:
@@ -411,12 +417,14 @@ def handle_home():
                     return render_template(
                         'state.html',
                         state=state.upper(),
+                        state_name=state_full_name,  # Add state_name for the template
                         state_full_name=state_full_name,
                         city_links=city_links,
                         required=required_data,
                         canonical_url=get_canonical_url(),
                         main_service=main_service,
-                        company_name=required_data.get("company_name")
+                        city_name="",  # Empty placeholder for city_name in the template
+                        company_name=required_data.get("Company Name", "")
                     )
             except Exception as e:
                 print(f"Error serving state page: {e}")
@@ -424,12 +432,14 @@ def handle_home():
                 return render_template(
                     'state.html',
                     state=state.upper(),
+                    state_name=state_full_name,  # Add state_name for the template
                     state_full_name=state_full_name,
                     city_links=city_links,
                     required=required_data,
                     canonical_url=get_canonical_url(),
                     main_service=main_service,
-                    company_name=required_data.get("company_name")
+                    city_name="",  # Empty placeholder for city_name in the template
+                    company_name=required_data.get("Company Name", "")
                 )
         else:
             # Parse subdomain for city page
