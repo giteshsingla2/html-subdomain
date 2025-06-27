@@ -338,7 +338,6 @@ def handle_home():
                     state_links=state_links,
                     required=required_data,
                     canonical_url=get_canonical_url(),
-                    favicon=required_data.get("favicon"),
                     main_service=required_data.get("main-service"),
                     company_name=required_data.get("company_name")
                 )
@@ -350,7 +349,6 @@ def handle_home():
                     state_links=state_links,
                     required=required_data,
                     canonical_url=get_canonical_url(),
-                    favicon=required_data.get("favicon"),
                     main_service=required_data.get("main-service"),
                     company_name=required_data.get("company_name")
                 )
@@ -362,7 +360,6 @@ def handle_home():
                 state_links=state_links,
                 required=required_data,
                 canonical_url=get_canonical_url(),
-                favicon=required_data.get("favicon"),
                 main_service=required_data.get("main-service"),
                 company_name=required_data.get("company_name")
             )
@@ -408,7 +405,6 @@ def handle_home():
                         city_links=city_links,
                         required=required_data,
                         canonical_url=get_canonical_url(),
-                        favicon=required_data.get("favicon"),
                         main_service=main_service,
                         company_name=required_data.get("company_name")
                     )
@@ -422,7 +418,6 @@ def handle_home():
                         city_links=city_links,
                         required=required_data,
                         canonical_url=get_canonical_url(),
-                        favicon=required_data.get("favicon"),
                         main_service=main_service,
                         company_name=required_data.get("company_name")
                     )
@@ -436,7 +431,6 @@ def handle_home():
                     city_links=city_links,
                     required=required_data,
                     canonical_url=get_canonical_url(),
-                    favicon=required_data.get("favicon"),
                     main_service=main_service,
                     company_name=required_data.get("company_name")
                 )
