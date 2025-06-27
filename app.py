@@ -131,6 +131,19 @@ def load_required_json():
 
 def replace_placeholders(text, service_name, city_name, state_abbreviation, state_full_name, required_data, zip_codes=[], city_zip_code=""):
     """Replace placeholders and process spintax in HTML content"""
+    
+    # First, protect style tags content from replacement
+    style_blocks = []
+    
+    def save_style_blocks(match):
+        style_blocks.append(match.group(1))
+        return f"__STYLE_BLOCK_{len(style_blocks)-1}__"
+    
+    # Extract and replace style blocks with placeholders
+    style_pattern = r'<style[^>]*>(.*?)</style>'
+    text = re.sub(style_pattern, save_style_blocks, text, flags=re.DOTALL)
+    
+    # Process spintax
     pattern = r'\{([^}]*)\}'
     
     # Generate a consistent seed for this city-state pair
@@ -175,11 +188,16 @@ def replace_placeholders(text, service_name, city_name, state_abbreviation, stat
         "[Company Name]": required_data.get("Business Name", "N/A"),
         "[Phone]": required_data.get("Phone", "N/A"),
         "[Email]": required_data.get("Business Email", "N/A"),
-        "[Address]": required_data.get("Business Address", "N/A")
+        "[Address]": required_data.get("Business Address", "N/A"),
+        "[Canonical URL]": get_canonical_url()  # Add canonical URL placeholder
     }
     
     for placeholder, value in replacements.items():
         text = text.replace(placeholder, str(value))
+    
+    # Restore style blocks
+    for i, style_block in enumerate(style_blocks):
+        text = text.replace(f"__STYLE_BLOCK_{i}__", f"<style>{style_block}</style>")
         
     return text
 
