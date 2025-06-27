@@ -710,56 +710,7 @@ def serve_static(filename):
     
     return send_from_directory(static_folder, filename)
 
-@app.route('/')
-def handle_home():
-    """Main route handler for homepage"""
-    # Parse subdomain
-    main_service, city_subdomain, state_subdomain = parse_subdomain()
-    
-    if not (main_service and city_subdomain and state_subdomain):
-        # Not a valid subdomain
-        abort(404)
-    
-    # Get city info
-    city_info = get_city_info(city_subdomain, state_subdomain)
-    if not city_info or not state_exists(state_subdomain):
-        abort(404)
-        
-    city_name = city_info['city_name'].title()
-    city_zip_code = city_info['zip_code']
-    state_name = get_state_full_name(state_subdomain)
-    state_abbreviation = state_subdomain.upper()
-    zip_codes = get_zip_codes_from_db(city_name)
-    
-    # Load required.json for main service
-    required_data = request.required_data
-    main_service_name = required_data.get('main-service', main_service)
-    
-    # Get HTML content from domain folder
-    main_domain = get_main_domain()
-    index_path = f"domains/{main_domain}/index.html"
-    
-    try:
-        content = load_html_file(index_path)
-        if not content:
-            abort(404)
-            
-        # Replace placeholders in the HTML content
-        processed_content = replace_placeholders(
-            content,
-            main_service_name,
-            city_name,
-            state_abbreviation,
-            state_name,
-            required_data,
-            zip_codes,
-            city_zip_code
-        )
-        
-        return processed_content
-    except Exception as e:
-        print(f"Error serving homepage: {e}")
-        abort(404)
+# Second handle_home function removed to fix duplicate route handler issue
 
 @app.route('/<page_name>')
 def handle_page(page_name):
