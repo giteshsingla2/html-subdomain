@@ -79,7 +79,10 @@ def load_html_file(file_path):
 # Function to invalidate HTML cache when JSON files are updated
 def invalidate_html_cache():
     """Invalidate the HTML file cache"""
+    print("DEBUG: Invalidating HTML cache")
     cache.delete_memoized(load_html_file)
+    # Also invalidate the cities cache
+    cache.delete_memoized(get_cities_in_state)
 
 def get_main_domain():
     host = request.host
@@ -395,6 +398,15 @@ def handle_home():
             print(f"DEBUG: Processing state page for {state} ({state_full_name})")
             cities = get_cities_in_state(state)
             print(f"DEBUG: Found {len(cities)} cities for state {state}: {cities[:5]}...")
+            # Force reload cities from database to bypass cache
+            if not cities:
+                print("DEBUG: No cities found in cache, trying direct database query")
+                with sqlite3.connect('newcities.db') as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT city_name FROM Cities WHERE state_code = ?", (state.upper(),))
+                    cities = [row['city_name'] for row in cursor.fetchall()]
+                    print(f"DEBUG: Direct DB query found {len(cities)} cities for {state}: {cities[:5]}...")
             
             # Load required.json for main service
             required_data = request.required_data
@@ -430,6 +442,8 @@ def handle_home():
                 if content:
                     # Render the template with Jinja2
                     template = Template(content)
+                    print(f"DEBUG: city_links contains {len(city_links)} items")
+                    print(f"DEBUG: First 3 city_links: {list(city_links.items())[:3]}")
                     rendered = template.render(
                         state=state.upper(),
                         state_name=state_full_name,  # Add state_name for the template
@@ -441,6 +455,7 @@ def handle_home():
                         city_name="",  # Empty placeholder for city_name in the template
                         company_name=required_data.get("Company Name", "")
                     )
+                    print("DEBUG: Template rendered successfully")
                     return rendered
                 else:
                     # Fallback to template rendering if HTML file doesn't exist
