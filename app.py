@@ -96,16 +96,51 @@ def parse_subdomain():
         tuple: (main_service, city_subdomain, state_subdomain)
     """
     host = request.host
-    subdomains = host.split('.')[0].split('-')
+    subdomain_parts = host.split('.')[0].split('-')
     
     # Check if we have at least 3 parts: main-service, city, state
-    if len(subdomains) >= 3:
-        # The last part is the state
-        state_subdomain = subdomains[-1]
+    if len(subdomain_parts) >= 3:
+        # The last part is the state (always 2 characters)
+        state_subdomain = subdomain_parts[-1]
+        
+        # Check if the last part is a valid state code (2 letters)
+        if len(state_subdomain) != 2:
+            print(f"DEBUG: Invalid state code: {state_subdomain}")
+            return None, None, None
+            
+        # Try to load required.json to check main service name
+        try:
+            main_domain = get_main_domain()
+            required_path = f"domains/{main_domain}/required.json"
+            # Use direct file loading to avoid circular dependency with before_request
+            if os.path.exists(required_path):
+                with open(required_path, 'r') as f:
+                    required_data = json.load(f)
+                main_service_name = required_data.get('main-service', '')
+            else:
+                main_service_name = ''
+            
+            # Convert main service to slug format for comparison
+            main_service_slug = main_service_name.lower().replace(' ', '-')
+            main_service_parts = main_service_slug.split('-')
+            
+            # Check if the beginning of subdomain matches the main service slug
+            if len(main_service_parts) > 0 and len(subdomain_parts) >= len(main_service_parts) + 2:
+                # Check if the beginning parts match the main service
+                if subdomain_parts[:len(main_service_parts)] == main_service_parts:
+                    # Main service is the first N parts matching the main service name
+                    main_service = '-'.join(subdomain_parts[:len(main_service_parts)])
+                    # City is everything between main service and state
+                    city_subdomain = '-'.join(subdomain_parts[len(main_service_parts):-1])
+                    return main_service, city_subdomain, state_subdomain
+        except Exception as e:
+            print(f"DEBUG: Error loading required.json: {e}")
+        
+        # Fallback to original logic if the above doesn't work
         # The first part is the main service
-        main_service = subdomains[0]
+        main_service = subdomain_parts[0]
         # Everything in between is the city
-        city_subdomain = '-'.join(subdomains[1:-1])
+        city_subdomain = '-'.join(subdomain_parts[1:-1])
         return main_service, city_subdomain, state_subdomain
     else:
         # Not enough parts for the new format
