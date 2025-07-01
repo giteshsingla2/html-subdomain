@@ -90,61 +90,72 @@ def get_main_domain():
     return main_domain
 
 def parse_subdomain():
-    """Parse the subdomain to extract main_service, city, and state.
+    """Parse the subdomain to extract main_service, city, and state using regex.
+    
+    The format is: service-slug-city-slug-state
+    Where:
+    - service-slug: must exactly match the slugified 'main-service' from required.json
+    - city-slug: the city name with hyphens (e.g., new-york)
+    - state: two-letter state code (e.g., ny)
     
     Returns:
-        tuple: (main_service, city_subdomain, state_subdomain)
+        tuple: (main_service, city_subdomain, state_subdomain) if valid, or (None, None, None) if invalid
     """
-    host = request.host
-    subdomain_parts = host.split('.')[0].split('-')
+    import re
     
-    # Check if we have at least 3 parts: main-service, city, state
-    if len(subdomain_parts) >= 3:
-        # The last part is the state (always 2 characters)
-        state_subdomain = subdomain_parts[-1]
+    # Normalize case - convert host to lowercase
+    host = request.host.lower()
+    print(f"DEBUG: Parsing subdomain from host: {host}")
+    
+    # Get the subdomain part (everything before the first dot)
+    subdomain = host.split('.')[0] if '.' in host else host
+    
+    # Use re.fullmatch to ensure the entire string matches the pattern
+    # Pattern: everything up to the last two hyphens, what's between the last two hyphens, and the final two-letter code
+    pattern = r'(.+)-([^-]+)-([a-z]{2})'
+    match = re.fullmatch(pattern, subdomain)
+    
+    if not match:
+        print(f"DEBUG: Subdomain '{subdomain}' doesn't match the expected pattern")
+        return None, None, None
+    
+    # Extract the three parts
+    extracted_service = match.group(1)  # service slug (can contain hyphens)
+    city_subdomain = match.group(2)  # city slug
+    state_subdomain = match.group(3)  # state code (2 letters)
+    
+    print(f"DEBUG: Regex parsed: service='{extracted_service}', city='{city_subdomain}', state='{state_subdomain}'")
+    
+    # Strictly validate that the extracted service matches what's in required.json
+    try:
+        main_domain = get_main_domain()
+        required_path = f"domains/{main_domain}/required.json"
         
-        # Check if the last part is a valid state code (2 letters)
-        if len(state_subdomain) != 2:
-            print(f"DEBUG: Invalid state code: {state_subdomain}")
+        if not os.path.exists(required_path):
+            print(f"DEBUG: required.json not found at {required_path}")
             return None, None, None
             
-        # Try to load required.json to check main service name
-        try:
-            main_domain = get_main_domain()
-            required_path = f"domains/{main_domain}/required.json"
-            # Use direct file loading to avoid circular dependency with before_request
-            if os.path.exists(required_path):
-                with open(required_path, 'r') as f:
-                    required_data = json.load(f)
-                main_service_name = required_data.get('main-service', '')
-            else:
-                main_service_name = ''
-            
-            # Convert main service to slug format for comparison
-            main_service_slug = main_service_name.lower().replace(' ', '-')
-            main_service_parts = main_service_slug.split('-')
-            
-            # Check if the beginning of subdomain matches the main service slug
-            if len(main_service_parts) > 0 and len(subdomain_parts) >= len(main_service_parts) + 2:
-                # Check if the beginning parts match the main service
-                if subdomain_parts[:len(main_service_parts)] == main_service_parts:
-                    # Main service is the first N parts matching the main service name
-                    main_service = '-'.join(subdomain_parts[:len(main_service_parts)])
-                    # City is everything between main service and state
-                    city_subdomain = '-'.join(subdomain_parts[len(main_service_parts):-1])
-                    return main_service, city_subdomain, state_subdomain
-        except Exception as e:
-            print(f"DEBUG: Error loading required.json: {e}")
+        with open(required_path, 'r') as f:
+            required_data = json.load(f)
         
-        # Fallback to original logic if the above doesn't work
-        # The first part is the main service
-        main_service = subdomain_parts[0]
-        # Everything in between is the city
-        city_subdomain = '-'.join(subdomain_parts[1:-1])
-        return main_service, city_subdomain, state_subdomain
-    else:
-        # Not enough parts for the new format
+        # Normalize case for expected service as well
+        expected_service = required_data.get('main-service', '').lower().replace(' ', '-')
+        
+        if not expected_service:
+            print(f"DEBUG: No 'main-service' defined in required.json")
+            return None, None, None
+            
+        if expected_service != extracted_service:
+            print(f"DEBUG: Extracted service '{extracted_service}' doesn't match required '{expected_service}'")
+            return None, None, None
+            
+        print(f"DEBUG: Service validation successful: '{extracted_service}' matches required service")
+        
+    except Exception as e:
+        print(f"DEBUG: Error validating main service against required.json: {e}")
         return None, None, None
+    
+    return extracted_service, city_subdomain, state_subdomain
 
 # Before request middleware to load required.json
 @app.before_request
@@ -253,8 +264,34 @@ def state_exists(state_abbr):
     return state_abbr in db_cache.states
 
 @cache.memoize(timeout=86400)  # Cache for 1 day
-def get_cities_in_state(state_abbr):
-    return db_cache.cities.get(state_abbr, [])
+def get_cities_in_state(state_code):
+    """Get list of all cities in a state from the database
+    
+    Args:
+        state_code (str): Two-letter state code
+        
+    Returns:
+        list: Sorted list of cities in the state
+    """
+    state_code = state_code.lower()
+    
+    # First try to get from cache
+    if state_code in db_cache.cities:
+        return sorted(db_cache.cities[state_code])
+    else:
+        print(f"Warning: No cities found for state code '{state_code}' in cache")
+        # Try to get cities directly from the database as fallback
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT city_name FROM Cities WHERE LOWER(state_code) = ?", (state_code,))
+        cities = [row['city_name'] for row in cursor.fetchall()]
+        conn.close()
+        
+        # Update the cache for future requests
+        if cities:
+            db_cache.cities[state_code] = cities
+            
+        return sorted(cities)
 
 def get_city_info(city_subdomain, state_abbr):
     city_subdomain_lower = city_subdomain.lower()
@@ -285,23 +322,8 @@ def get_states():
     """Get list of all states from the database"""
     return list(db_cache.states.keys())
 
-def get_cities_in_state(state_code):
-    """Get list of all cities in a state from the database"""
-    state_code = state_code.lower()
-    
-    # The structure of db_cache.cities changed - it's now a dict with state_code as keys
-    # and lists of cities as values
-    if state_code in db_cache.cities:
-        return sorted(db_cache.cities[state_code])
-    else:
-        print(f"Warning: No cities found for state code '{state_code}'")
-        # Try to get cities directly from the database as fallback
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT city_name FROM Cities WHERE LOWER(state_code) = ?", (state_code,))
-        cities = [row['city_name'] for row in cursor.fetchall()]
-        conn.close()
-        return sorted(cities)
+# The duplicate get_cities_in_state function has been removed.
+# The memoized version above is now used for all calls.
 
 def get_other_cities_in_state(state_code, current_city):
     """Get list of other cities in the same state, excluding the current city"""
@@ -524,7 +546,9 @@ def handle_home():
         else:
             # Parse subdomain for city page
             main_service, city_subdomain, state_subdomain = parse_subdomain()
-            if not (main_service and city_subdomain and state_subdomain):
+            # Strictly enforce that all three components must be non-None
+            if main_service is None or city_subdomain is None or state_subdomain is None:
+                print("DEBUG: Invalid subdomain format detected, returning 404")
                 abort(404)
                 
             # Get city info
@@ -608,7 +632,9 @@ def handle_page(page_name):
     # Parse subdomain
     main_service, city_subdomain, state_subdomain = parse_subdomain()
     
-    if not (main_service and city_subdomain and state_subdomain):
+    # Strictly enforce that all three components must be non-None
+    if main_service is None or city_subdomain is None or state_subdomain is None:
+        print(f"DEBUG: Invalid subdomain format detected in handle_page for {page_name}, returning 404")
         # Not a valid subdomain
         abort(404)
     
@@ -731,7 +757,8 @@ def page_not_found(e):
     # Parse subdomain to see if we're on a city page
     main_service, city_subdomain, state_subdomain = parse_subdomain()
     
-    if main_service and city_subdomain and state_subdomain:
+    # Only proceed with custom 404 if we have valid subdomain components
+    if main_service is not None and city_subdomain is not None and state_subdomain is not None:
         # We're on a city page, try to get city info for placeholder replacement
         try:
             city_info = get_city_info(city_subdomain, state_subdomain)
