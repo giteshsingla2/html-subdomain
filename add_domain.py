@@ -13,22 +13,22 @@ def add_domain():
     try:
         # 1) Create your site directory
         subprocess.run(
-            ['sudo','mkdir','-p',f'/var/www/html-subdomain/domains/{domain_name}'],
+            ['mkdir','-p',f'/var/www/html-subdomain/domains/{domain_name}'],
             check=True
         )
         subprocess.run(
-            ['sudo','chown','-R','www-data:www-data',
+            ['chown','-R','www-data:www-data',
              f'/var/www/html-subdomain/domains/{domain_name}/'],
             check=True
         )
         subprocess.run(
-            ['sudo','find',
+            ['find',
              f'/var/www/html-subdomain/domains/{domain_name}/',
              '-type','d','-exec','chmod','755','{}',';'],
             check=True
         )
         subprocess.run(
-            ['sudo','find',
+            ['find',
              f'/var/www/html-subdomain/domains/{domain_name}/',
              '-type','f','-exec','chmod','644','{}',';'],
             check=True
@@ -71,12 +71,12 @@ server {{
             f.write(nginx_conf)
 
         # 3) Enable & reload nginx
-        subprocess.run(['sudo','ln','-sf',
+        subprocess.run(['ln','-sf',
                         conf_path,
                         f'/etc/nginx/sites-enabled/{domain_name}'],
                        check=True)
-        subprocess.run(['sudo','nginx','-t'], check=True)
-        subprocess.run(['sudo','systemctl','reload','nginx'], check=True)
+        subprocess.run(['nginx','-t'], check=True)
+        subprocess.run(['systemctl','reload','nginx'], check=True)
 
         return jsonify({"message": f"Domain {domain_name} added successfully"}), 200
 
