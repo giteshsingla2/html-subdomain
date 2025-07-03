@@ -110,23 +110,23 @@ def parse_subdomain():
     # Get the subdomain part (everything before the first dot)
     subdomain = host.split('.')[0] if '.' in host else host
     
-    # Use re.fullmatch to ensure the entire string matches the pattern
-    # Pattern: everything up to the last two hyphens, what's between the last two hyphens, and the final two-letter code
-    pattern = r'(.+)-([^-]+)-([a-z]{2})'
-    match = re.fullmatch(pattern, subdomain)
-    
-    if not match:
-        print(f"DEBUG: Subdomain '{subdomain}' doesn't match the expected pattern")
+    # First try to extract the state code (last 2 characters)
+    if len(subdomain) < 3 or not subdomain[-2:].isalpha():
+        print(f"DEBUG: Subdomain '{subdomain}' doesn't end with a valid state code")
         return None, None, None
+        
+    # Extract the state code (last 2 characters)
+    state_subdomain = subdomain[-2:]
     
-    # Extract the three parts
-    extracted_service = match.group(1)  # service slug (can contain hyphens)
-    city_subdomain = match.group(2)  # city slug
-    state_subdomain = match.group(3)  # state code (2 letters)
+    # Check if the state code is preceded by a hyphen
+    if len(subdomain) < 4 or subdomain[-3] != '-':
+        print(f"DEBUG: Subdomain '{subdomain}' doesn't have a hyphen before state code")
+        return None, None, None
+        
+    # Remove the state code part including the hyphen
+    remaining = subdomain[:-3]
     
-    print(f"DEBUG: Regex parsed: service='{extracted_service}', city='{city_subdomain}', state='{state_subdomain}'")
-    
-    # Strictly validate that the extracted service matches what's in required.json
+    # Find the service name from required.json
     try:
         main_domain = get_main_domain()
         required_path = f"domains/{main_domain}/required.json"
@@ -138,24 +138,29 @@ def parse_subdomain():
         with open(required_path, 'r') as f:
             required_data = json.load(f)
         
-        # Normalize case for expected service as well
+        # Normalize case for expected service
         expected_service = required_data.get('main-service', '').lower().replace(' ', '-')
         
         if not expected_service:
             print(f"DEBUG: No 'main-service' defined in required.json")
             return None, None, None
-            
-        if expected_service != extracted_service:
-            print(f"DEBUG: Extracted service '{extracted_service}' doesn't match required '{expected_service}'")
+    
+        # Check if the subdomain starts with the expected service
+        if not remaining.startswith(expected_service + '-'):
+            print(f"DEBUG: Subdomain '{subdomain}' doesn't start with expected service '{expected_service}-'")
             return None, None, None
             
-        print(f"DEBUG: Service validation successful: '{extracted_service}' matches required service")
+        # Extract the city part (everything between service and state)
+        city_subdomain = remaining[len(expected_service) + 1:]
+        
+        print(f"DEBUG: Successfully parsed: service='{expected_service}', city='{city_subdomain}', state='{state_subdomain}'")
+        return expected_service, city_subdomain, state_subdomain
         
     except Exception as e:
-        print(f"DEBUG: Error validating main service against required.json: {e}")
+        print(f"DEBUG: Error extracting service and city: {e}")
         return None, None, None
     
-    return extracted_service, city_subdomain, state_subdomain
+    # The rest of the function has been replaced by the new implementation above
 
 # Before request middleware to load required.json
 @app.before_request
