@@ -719,32 +719,164 @@ def handle_page(page_name):
         print(f"Error serving page {page_name}: {e}")
         abort(404)
 
-@app.route('/update-json/<filename>', methods=['POST'])
-def update_json(filename):
-    """Update JSON file and invalidate cache"""
-    if not filename.endswith('.json'):
-        return jsonify({"error": "Invalid file type"}), 400
-        
-    main_domain = get_main_domain()
-    file_path = f"domains/{main_domain}/{filename}"
+@app.route('/update-files', methods=['PUT'])
+def update_files():
+    """Update multiple files for a specific domain and reload only that domain's cache
     
+    Request format:
+    {
+        "domain": "domain-name.com",
+        "files": [
+            { "filename": "test.html", "content": "<h1>Test</h1>" },
+            { "filename": "required.json", "content": "{\"key\": \"value\"}" }
+        ]
+    }
+    """
     try:
-        data = request.get_json()
+        # Accept both JSON and form data
+        if request.is_json:
+            try:
+                data = request.get_json()
+            except Exception as e:
+                print(f"Error parsing JSON: {str(e)}")
+                return jsonify({"error": f"Invalid JSON format: {str(e)}"}), 400
+        else:
+            # Try to parse the request body as JSON with more lenient parsing
+            try:
+                # First try standard JSON parsing
+                try:
+                    data = json.loads(request.data.decode('utf-8'))
+                except json.JSONDecodeError as e:
+                    # If that fails, try to fix common JSON syntax errors
+                    raw_data = request.data.decode('utf-8')
+                    # Fix trailing commas in arrays and objects
+                    fixed_data = re.sub(r',\s*([\]\}])', r'\1', raw_data)
+                    try:
+                        data = json.loads(fixed_data)
+                        print("Fixed malformed JSON with trailing commas")
+                    except json.JSONDecodeError:
+                        return jsonify({"error": f"Invalid JSON format: {str(e)}"}), 400
+            except Exception as e:
+                print(f"Error processing request data: {str(e)}")
+                return jsonify({"error": f"Could not parse request body: {str(e)}"}), 400
+        
         if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
+            return jsonify({"error": "No data provided"}), 400
             
-        # Write the updated JSON to file
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=4)
+        # Validate request format
+        if 'domain' not in data:
+            return jsonify({"error": "Missing 'domain' field in request"}), 400
             
-        # Invalidate the cache for this file
-        cache.delete_memoized(load_json, file_path)
+        if 'files' not in data:
+            return jsonify({"error": "Missing 'files' field in request"}), 400
+            
+        if not isinstance(data['files'], list):
+            return jsonify({"error": "'files' must be an array"}), 400
+            
+        if not data['files']:
+            return jsonify({"error": "'files' array cannot be empty"}), 400
+            
+        domain = data['domain']
+        files = data['files']
         
-        # Also invalidate HTML cache since JSON data changed
-        invalidate_html_cache()
+        # Extract domain name without protocol
+        if '://' in domain:
+            domain = domain.split('://', 1)[1]
         
-        return jsonify({"success": True, "message": f"{filename} updated successfully"})
+        # Remove port if present
+        if ':' in domain:
+            domain = domain.split(':', 1)[0]
+            
+        # Create domain directory if it doesn't exist
+        domain_dir = f"domains/{domain}"
+        os.makedirs(domain_dir, exist_ok=True)
+        
+        # Print the received files for debugging
+        print(f"Processing {len(files)} files for domain {domain}")
+        
+        updated_files = []
+        for i, file_item in enumerate(files):
+            # Validate each file item
+            if not isinstance(file_item, dict):
+                return jsonify({"error": f"File item at index {i} is not an object"}), 400
+                
+            if 'filename' not in file_item:
+                return jsonify({"error": f"Missing 'filename' in file item at index {i}"}), 400
+                
+            if 'content' not in file_item:
+                return jsonify({"error": f"Missing 'content' in file item at index {i}"}), 400
+                
+            filename = file_item['filename']
+            content = file_item['content']
+            
+            # Prevent directory traversal attacks
+            if '..' in filename or filename.startswith('/'):
+                return jsonify({"error": f"Invalid filename: {filename}"}), 400
+                
+            file_path = os.path.join(domain_dir, filename)
+            
+            # Ensure the parent directory exists
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            # Write the file content
+            if filename.endswith('.json'):
+                try:
+                    # Validate JSON content
+                    json_content = json.loads(content) if isinstance(content, str) else content
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(json_content, f, indent=4)
+                except json.JSONDecodeError:
+                    return jsonify({"error": f"Invalid JSON content for {filename}"}), 400
+            else:
+                # Write as plain text
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                    
+            updated_files.append(filename)
+            
+            # Invalidate specific file cache
+            if filename.endswith('.json'):
+                cache.delete_memoized(load_json, file_path)
+            elif filename.endswith('.html'):
+                cache.delete_memoized(load_html_file, file_path)
+        
+        # Invalidate domain-specific caches
+        # Since we can't directly access cache keys in Flask-Caching,
+        # we'll invalidate specific known caches related to the domain
+        
+        # Invalidate HTML file cache for this domain
+        for filename in updated_files:
+            if filename.endswith('.html'):
+                file_path = os.path.join(domain_dir, filename)
+                print(f"Invalidating cache for HTML file: {file_path}")
+                cache.delete_memoized(load_html_file, file_path)
+        
+        # Invalidate JSON file cache for this domain
+        for filename in updated_files:
+            if filename.endswith('.json'):
+                file_path = os.path.join(domain_dir, filename)
+                print(f"Invalidating cache for JSON file: {file_path}")
+                cache.delete_memoized(load_json, file_path)
+                
+        # If required.json was updated, invalidate domain data cache
+        if any(f == "required.json" for f in updated_files):
+            print(f"Invalidating domain data cache for {domain}")
+            cache.delete_memoized(get_domain_data, domain)
+            
+        # Clear city and state caches if needed
+        # This is a more aggressive approach but ensures data consistency
+        if any(f.endswith('.json') for f in updated_files):
+            print("Invalidating city and state caches")
+            cache.delete_memoized(get_cities_in_state)
+            cache.delete_memoized(get_states)
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Updated {len(updated_files)} files for {domain}",
+            "updated_files": updated_files
+        })
     except Exception as e:
+        print(f"Error in update_files: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.errorhandler(404)
