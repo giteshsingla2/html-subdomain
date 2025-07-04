@@ -186,16 +186,34 @@ def load_required_json():
 def replace_placeholders(text, service_name, city_name, state_abbreviation, state_full_name, required_data, zip_codes=[], city_zip_code=""):
     """Replace placeholders and process spintax in HTML content"""
     
-    # First, protect style tags content from replacement
-    style_blocks = []
+    # First, protect regular script and style tags from all replacements
+    fully_protected_blocks = []
     
-    def save_style_blocks(match):
-        style_blocks.append(match.group(1))
-        return f"__STYLE_BLOCK_{len(style_blocks)-1}__"
+    # Extract and replace regular script and style tags (excluding JSON-LD schema)
+    regular_tag_pattern = r'(<(style|script)(?![^>]*type="application/ld\+json")[^>]*>.*?</\2>)'
     
-    # Extract and replace style blocks with placeholders
-    style_pattern = r'<style[^>]*>(.*?)</style>'
-    text = re.sub(style_pattern, save_style_blocks, text, flags=re.DOTALL)
+    def save_fully_protected_tag(match):
+        entire_tag = match.group(1)
+        fully_protected_blocks.append(entire_tag)
+        return f"__FULLY_PROTECTED_BLOCK_{len(fully_protected_blocks)-1}__"
+    
+    # Replace regular script and style tags with placeholders
+    text = re.sub(regular_tag_pattern, save_fully_protected_tag, text, flags=re.DOTALL)
+    
+    # Now handle JSON-LD schema blocks separately - we'll protect them from spintax
+    # but allow placeholder replacements
+    schema_blocks = []
+    schema_pattern = r'(<script[^>]*type="application/ld\+json"[^>]*>)(.*?)(</script>)'
+    
+    def save_schema_block(match):
+        opening = match.group(1)
+        content = match.group(2)
+        closing = match.group(3)
+        schema_blocks.append((opening, content, closing))
+        return f"__SCHEMA_BLOCK_{len(schema_blocks)-1}__"
+    
+    # Replace schema blocks with placeholders
+    text = re.sub(schema_pattern, save_schema_block, text, flags=re.DOTALL)
     
     # Process spintax
     pattern = r'\{([^}]*)\}'
@@ -249,9 +267,43 @@ def replace_placeholders(text, service_name, city_name, state_abbreviation, stat
     for placeholder, value in replacements.items():
         text = text.replace(placeholder, str(value))
     
-    # Restore style blocks
-    for i, style_block in enumerate(style_blocks):
-        text = text.replace(f"__STYLE_BLOCK_{i}__", f"<style>{style_block}</style>")
+    # Restore fully protected blocks (regular script and style tags)
+    for i, block in enumerate(fully_protected_blocks):
+        text = text.replace(f"__FULLY_PROTECTED_BLOCK_{i}__", block)
+    
+    # Process schema blocks - apply placeholder replacements but not spintax
+    for i, (opening, content, closing) in enumerate(schema_blocks):
+        # Apply only placeholder replacements to schema content
+        processed_content = content
+        
+        # Apply placeholder replacements to schema content
+        replacements = {
+            "[Service]": service_name,
+            "[service]": service_name.lower(),
+            "[City-State]": f"{city_name}, {state_abbreviation}",
+            "[city-state]": f"{city_name.lower()}, {state_abbreviation.lower()}",
+            "[City]": city_name,
+            "[city]": city_name.lower(),
+            "[CITY]": city_name.upper(),
+            "[State]": state_abbreviation,
+            "[state]": state_abbreviation.lower(),
+            "[STATE]": state_abbreviation.upper(),
+            "[State Full]": state_full_name,
+            "[Zipcode]": city_zip_code,
+            "[City Zip Code]": city_zip_code,
+            "[Zip Codes]": ", ".join(str(z) for z in zip_codes if z),
+            "[Company Name]": required_data.get("Business Name", "N/A"),
+            "[Phone]": required_data.get("Phone", "N/A"),
+            "[Email]": required_data.get("Business Email", "N/A"),
+            "[Address]": required_data.get("Business Address", "N/A"),
+            "[Canonical URL]": get_canonical_url()  # Canonical URL placeholder
+        }
+        
+        for placeholder, value in replacements.items():
+            processed_content = processed_content.replace(placeholder, str(value))
+            
+        # Restore the processed schema block
+        text = text.replace(f"__SCHEMA_BLOCK_{i}__", opening + processed_content + closing)
         
     return text
 
@@ -502,13 +554,13 @@ def handle_home():
                 # First try to load the HTML file
                 content = load_html_file(state_path)
                 if content:
-                    # Render the template with Jinja2
+                    # First render the template with Jinja2
                     template = Template(content)
                     print(f"DEBUG: city_links contains {len(city_links)} items")
                     print(f"DEBUG: First 3 city_links: {list(city_links.items())[:3]}")
                     rendered = template.render(
                         state=state.upper(),
-                        state_name=state_full_name,  # Add state_name for the template
+                        state_name=state_full_name,
                         state_full_name=state_full_name,
                         city_links=city_links,
                         required=required_data,
@@ -517,14 +569,27 @@ def handle_home():
                         city_name="",  # Empty placeholder for city_name in the template
                         company_name=required_data.get("Company Name", "")
                     )
-                    print("DEBUG: Template rendered successfully")
-                    return rendered
+                    
+                    # Then process placeholders and spintax
+                    processed_content = replace_placeholders(
+                        rendered,
+                        main_service,  # service_name
+                        "",  # city_name (empty for state pages)
+                        state.upper(),  # state_abbreviation
+                        state_full_name,  # state_full_name
+                        required_data,  # required_data
+                        [],  # zip_codes (empty for state pages)
+                        ""   # city_zip_code (empty for state pages)
+                    )
+                    
+                    print("DEBUG: Template rendered and placeholders processed successfully")
+                    return processed_content
                 else:
                     # Fallback to template rendering if HTML file doesn't exist
-                    return render_template(
+                    rendered = render_template(
                         'state.html',
                         state=state.upper(),
-                        state_name=state_full_name,  # Add state_name for the template
+                        state_name=state_full_name,
                         state_full_name=state_full_name,
                         city_links=city_links,
                         required=required_data,
@@ -533,13 +598,27 @@ def handle_home():
                         city_name="",  # Empty placeholder for city_name in the template
                         company_name=required_data.get("Company Name", "")
                     )
+                    
+                    # Process placeholders and spintax
+                    processed_content = replace_placeholders(
+                        rendered,
+                        main_service,  # service_name
+                        "",  # city_name (empty for state pages)
+                        state.upper(),  # state_abbreviation
+                        state_full_name,  # state_full_name
+                        required_data,  # required_data
+                        [],  # zip_codes (empty for state pages)
+                        ""   # city_zip_code (empty for state pages)
+                    )
+                    
+                    return processed_content
             except Exception as e:
                 print(f"Error serving state page: {e}")
                 # Fallback to template rendering
-                return render_template(
+                rendered = render_template(
                     'state.html',
                     state=state.upper(),
-                    state_name=state_full_name,  # Add state_name for the template
+                    state_name=state_full_name,
                     state_full_name=state_full_name,
                     city_links=city_links,
                     required=required_data,
@@ -548,6 +627,23 @@ def handle_home():
                     city_name="",  # Empty placeholder for city_name in the template
                     company_name=required_data.get("Company Name", "")
                 )
+                
+                # Process placeholders and spintax
+                try:
+                    processed_content = replace_placeholders(
+                        rendered,
+                        main_service,  # service_name
+                        "",  # city_name (empty for state pages)
+                        state.upper(),  # state_abbreviation
+                        state_full_name,  # state_full_name
+                        required_data,  # required_data
+                        [],  # zip_codes (empty for state pages)
+                        ""   # city_zip_code (empty for state pages)
+                    )
+                    return processed_content
+                except Exception as e:
+                    print(f"Error processing placeholders in error fallback: {e}")
+                    return rendered  # Return unprocessed content as last resort
         else:
             # Parse subdomain for city page
             main_service, city_subdomain, state_subdomain = parse_subdomain()
